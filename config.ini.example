@@ -1,0 +1,44 @@
+[server]
+port = 8080
+# Enable when browsers access the application over HTTPS.
+secure_cookies = false
+# List only trusted reverse proxy IPs/CIDRs; leave empty when there is no proxy.
+trusted_proxies =
+
+[database]
+path = ./data/moitoring.db
+
+[admin]
+username = admin
+email = admin@example.local
+password = replace-this-before-use
+is_changed_password = true
+
+[rabbitmq]
+url = http://127.0.0.1:15672
+username = monitoring
+password = replace-this-with-a-read-only-rabbitmq-password
+virtual_hosts = /
+expected_queues =
+excluded_queues =
+poll_interval = 60s
+history_retention = 24h
+
+[systemd]
+units =
+# Example: targets = worker-a|jobs.service|active, ops@worker-b|billing.service|inactive
+targets =
+ssh_identity_file =
+ssh_known_hosts =
+
+[smtp]
+host = mail.example.local
+port = 587
+username = monitoring@example.local
+password = replace-this-with-an-smtp-password
+from = monitoring@example.local
+starttls = true
+
+[alerts]
+recipients = ops@example.local
+reminder_interval = 24h

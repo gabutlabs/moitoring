@@ -1,0 +1,61 @@
+name: Release
+
+on:
+  push:
+    branches: [main]
+    tags: ["v*"]
+  pull_request:
+
+permissions:
+  contents: write
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v7
+
+      - uses: actions/setup-go@v7
+        with:
+          go-version: 1.27.x
+
+      - uses: actions/setup-node@v7
+        with:
+          node-version: 22
+          cache: npm
+          cache-dependency-path: frontend/package-lock.json
+
+      - name: Build frontend and stage embedded assets
+        run: |
+          npm ci --prefix frontend
+          npm run build --prefix frontend
+          rm -rf internal/web/dist
+          mkdir -p internal/web/dist
+          cp -R frontend/dist/. internal/web/dist/
+
+      - name: Test with CGO disabled
+        run: CGO_ENABLED=0 go test ./...
+
+      - name: Build Linux release archives
+        run: |
+          set -eu
+          mkdir -p release
+          for arch in amd64 arm64; do
+            build_dir="release/build-linux-$arch"
+            mkdir -p "$build_dir"
+            CGO_ENABLED=0 GOOS=linux GOARCH="$arch" go build -trimpath -ldflags="-s -w" -o "$build_dir/moitoring" ./cmd
+            install -m 0644 config.ini.example "$build_dir/config.ini.example"
+            tar -czf "release/moitoring-linux-$arch.tar.gz" -C "$build_dir" moitoring config.ini.example
+            rm -rf "$build_dir"
+          done
+
+      - name: Publish release assets
+        if: startsWith(github.ref, 'refs/tags/v')
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          if gh release view "$GITHUB_REF_NAME" >/dev/null 2>&1; then
+            gh release upload "$GITHUB_REF_NAME" release/moitoring-linux-*.tar.gz --clobber
+          else
+            gh release create "$GITHUB_REF_NAME" release/moitoring-linux-*.tar.gz --generate-notes
+          fi
