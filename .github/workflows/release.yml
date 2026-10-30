@@ -45,7 +45,9 @@ jobs:
             mkdir -p "$build_dir"
             CGO_ENABLED=0 GOOS=linux GOARCH="$arch" go build -trimpath -ldflags="-s -w" -o "$build_dir/moitoring" ./cmd
             install -m 0644 config.ini.example "$build_dir/config.ini.example"
-            tar -czf "release/moitoring-linux-$arch.tar.gz" -C "$build_dir" moitoring config.ini.example
+            install -m 0644 deploy/moitoring.service.example "$build_dir/moitoring.service.example"
+            install -m 0644 deploy/moitoring-worker.service.example "$build_dir/moitoring-worker.service.example"
+            tar -czf "release/moitoring-linux-$arch.tar.gz" -C "$build_dir" moitoring config.ini.example moitoring.service.example moitoring-worker.service.example
             rm -rf "$build_dir"
           done
 

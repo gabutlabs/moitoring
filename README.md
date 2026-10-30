@@ -6,7 +6,13 @@
 curl -fsSL https://raw.githubusercontent.com/gabutlabs/moitoring/main/install.sh | sudo sh
 ```
 
-GitHub Actions builds the Vue frontend and Linux binaries with `CGO_ENABLED=0`, then publishes `amd64` and `arm64` archives for version tags. The installer downloads the matching latest release, so the target machine does not need Go or Node.js. Create a release by pushing a version tag, for example `git tag v0.1.0 && git push origin v0.1.0`; the install command works after the first release is published. The installer places the binary, `config.ini`, and `data/` in `/opt/moitoring`. Existing configuration is preserved on reinstall; review it before starting the API or worker. The installer gives `config.ini` and `data/` to the account that invoked `sudo`, so run the app as that account. Launch commands should run from `/opt/moitoring` so the relative SQLite path resolves to `/opt/moitoring/data/moitoring.db`.
+GitHub Actions builds the Vue frontend and Linux binaries with `CGO_ENABLED=0`, then publishes `amd64` and `arm64` archives for version tags. The installer downloads the matching latest release, so the target machine does not need Go or Node.js. Create a release by pushing a version tag, for example `git tag v0.1.0 && git push origin v0.1.0`; the install command works after the first release is published. The installer requires a running systemd host, places the binary, `config.ini`, and `data/` in `/opt/moitoring`, creates the `moitoring` service account, and enables and starts `moitoring.service`. Existing configuration is preserved on reinstall. The config and database are owned by the service account.
+
+The installer also places `moitoring-worker.service` but leaves it disabled until RabbitMQ and SMTP settings are configured in `/opt/moitoring/config.ini`. Then start it with:
+
+```sh
+sudo systemctl enable --now moitoring-worker.service
+```
 
 ## Run locally
 
@@ -68,7 +74,7 @@ The `worker` command requires Linux for local `systemd.units`; remote `systemd.t
 go run ./cmd worker --config /etc/moitoring/config.ini
 ```
 
-For a managed server process, install and adjust `deploy/moitoring-worker.service.example` as `moitoring-worker.service`, then enable it with `systemctl`. The service account must be able to read the config and write the configured SQLite directory; update `ReadWritePaths` if the database is stored elsewhere.
+The installer uses `deploy/moitoring.service.example` and `deploy/moitoring-worker.service.example` to create the systemd units. If the SQLite database is moved outside `/opt/moitoring/data`, update the units' `ReadWritePaths` to allow the service account to write to the new directory.
 
 Set `rabbitmq.url`, the read-only RabbitMQ username and password, and the virtual hosts in the protected configuration file. Set SMTP connection details under `[smtp]`, and the email recipients and `reminder_interval` under `[alerts]`. The sample uses a 24-hour reminder interval. Queue `running` and `idle` states clear a queue outage. Zero consumers show as a warning; RabbitMQ state `down`, a missing expected queue, or an unavailable RabbitMQ API creates a critical incident. Each incident emails immediately, sends no repeat on later polls, sends a reminder after 24 hours if still unresolved, and sends a recovery email when it clears. A later outage opens a new incident.
 

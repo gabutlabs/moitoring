@@ -1,0 +1,20 @@
+[Unit]
+Description=Moitoring web application
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=simple
+User=@SERVICE_USER@
+WorkingDirectory=@INSTALL_DIR@
+ExecStart=@INSTALL_DIR@/moitoring serve --config @INSTALL_DIR@/config.ini
+Restart=on-failure
+RestartSec=5
+NoNewPrivileges=true
+PrivateTmp=true
+ProtectSystem=strict
+ProtectHome=true
+ReadWritePaths=@INSTALL_DIR@/config.ini @INSTALL_DIR@/data
+
+[Install]
+WantedBy=multi-user.target

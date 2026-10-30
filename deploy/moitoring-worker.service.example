@@ -5,17 +5,16 @@ Wants=network-online.target
 
 [Service]
 Type=simple
-User=moitoring
-Group=moitoring
-WorkingDirectory=/var/lib/moitoring
-ExecStart=/usr/local/bin/moitoring worker --config /etc/moitoring/config.ini
+User=@SERVICE_USER@
+WorkingDirectory=@INSTALL_DIR@
+ExecStart=@INSTALL_DIR@/moitoring worker --config @INSTALL_DIR@/config.ini
 Restart=on-failure
 RestartSec=5
 NoNewPrivileges=true
 PrivateTmp=true
 ProtectSystem=strict
 ProtectHome=true
-ReadWritePaths=/var/lib/moitoring
+ReadWritePaths=@INSTALL_DIR@/config.ini @INSTALL_DIR@/data
 
 [Install]
 WantedBy=multi-user.target
