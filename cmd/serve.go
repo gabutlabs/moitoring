@@ -69,7 +69,7 @@ func runServer(settings config.Config, configPath string) error {
 	)
 	authHandler := handler.NewAuthHandler(authService, settings.Admin.Email, settings.Server.SecureCookies)
 	monitoringHandler := handler.NewMonitoringHandler(monitoringservice.NewQueryService(
-		sqlite.NewMonitoringRepository(db), settings.RabbitMQ.PollInterval, settings.RabbitMQ.ExcludedQueues,
+		sqlite.NewMonitoringRepository(db), settings.Monitoring.PollInterval, settings.RabbitMQ.ExcludedQueues,
 	))
 
 	router := gin.New()
@@ -85,7 +85,7 @@ func runServer(settings config.Config, configPath string) error {
 	router.NoRoute(gin.WrapH(webassets.Handler()))
 
 	server := &http.Server{
-		Addr:              fmt.Sprintf("127.0.0.1:%d", settings.Server.Port),
+		Addr:              settings.Server.Address(),
 		Handler:           router,
 		ReadHeaderTimeout: 5 * time.Second,
 	}

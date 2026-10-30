@@ -1,4 +1,6 @@
 [server]
+# Use 0.0.0.0 for direct network access; keep loopback behind a reverse proxy.
+host = 127.0.0.1
 port = 8080
 # Enable when browsers access the application over HTTPS.
 secure_cookies = false
@@ -14,6 +16,10 @@ email = admin@example.local
 password = replace-this-before-use
 is_changed_password = true
 
+[monitoring]
+# Applies to RabbitMQ queues and configured systemd units.
+poll_interval = 60s
+
 [rabbitmq]
 url = http://127.0.0.1:15672
 username = monitoring
@@ -21,7 +27,6 @@ password = replace-this-with-a-read-only-rabbitmq-password
 virtual_hosts = /
 expected_queues =
 excluded_queues =
-poll_interval = 60s
 history_retention = 24h
 
 [systemd]

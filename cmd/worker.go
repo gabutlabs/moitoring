@@ -73,7 +73,7 @@ func runWorker(parent context.Context, settings config.Config) error {
 		}
 	}
 	service := monitoringservice.NewService(collector, store, email.NewSender(settings.SMTP), monitoringservice.Settings{
-		PollInterval:     settings.RabbitMQ.PollInterval,
+		PollInterval:     settings.Monitoring.PollInterval,
 		HistoryRetention: settings.RabbitMQ.HistoryRetention,
 		ReminderInterval: settings.Alerts.ReminderInterval,
 		Recipients:       settings.Alerts.Recipients,

@@ -14,6 +14,27 @@ The installer also places `moitoring-worker.service` but leaves it disabled unti
 sudo systemctl enable --now moitoring-worker.service
 ```
 
+## Open the site from another machine
+
+The frontend and API share the same port, `8080` by default. The default host is `127.0.0.1`, which only accepts connections from the server itself. After installing a release that supports `server.host`, set it to `0.0.0.0` for direct IP access:
+
+```ini
+[server]
+host = 0.0.0.0
+port = 8080
+```
+
+Then restart the API and allow TCP port 8080 in the server firewall:
+
+```sh
+sudo systemctl restart moitoring.service
+sudo ss -ltnp | grep ':8080'
+curl -I http://127.0.0.1:8080/
+curl -i http://127.0.0.1:8080/api/health
+```
+
+If the firewall uses UFW, allow the port with `sudo ufw allow 8080/tcp`. Direct HTTP is unencrypted; for public access, a TLS reverse proxy is safer. Keep `host = 127.0.0.1` when using a reverse proxy on the same server.
+
 ## Run locally
 
 The app reads its port and SQLite path from `config.ini`. `config.ini.example` contains the starter settings; if `config.ini` is missing in a fresh checkout, copy the example with `cp config.ini.example config.ini`. Viper is pinned to 1.19 because Viper 1.20 removed INI decoding.
@@ -42,7 +63,7 @@ The starter screen shows whether the API is reachable and an honest empty state 
 
 ## Worker monitoring and alerts
 
-Run the worker on the server that can reach RabbitMQ's Management API. The worker polls queue state every 60 seconds, writes observations to the same SQLite database as `serve`, and sends email through the configured SMTP server. To monitor local systemd services, add their unit names under `[systemd]` in the protected configuration file:
+Run the worker on the server that can reach RabbitMQ's Management API. It polls RabbitMQ queues and configured systemd units on startup and then at the `monitoring.poll_interval` (60 seconds by default), writes observations to the same SQLite database as `serve`, and sends email through the configured SMTP server. To monitor local systemd services, add their unit names under `[systemd]` in the protected configuration file:
 
 ```ini
 [systemd]
@@ -76,7 +97,7 @@ go run ./cmd worker --config /etc/moitoring/config.ini
 
 The installer uses `deploy/moitoring.service.example` and `deploy/moitoring-worker.service.example` to create the systemd units. If the SQLite database is moved outside `/opt/moitoring/data`, update the units' `ReadWritePaths` to allow the service account to write to the new directory.
 
-Set `rabbitmq.url`, the read-only RabbitMQ username and password, and the virtual hosts in the protected configuration file. Set SMTP connection details under `[smtp]`, and the email recipients and `reminder_interval` under `[alerts]`. The sample uses a 24-hour reminder interval. Queue `running` and `idle` states clear a queue outage. Zero consumers show as a warning; RabbitMQ state `down`, a missing expected queue, or an unavailable RabbitMQ API creates a critical incident. Each incident emails immediately, sends no repeat on later polls, sends a reminder after 24 hours if still unresolved, and sends a recovery email when it clears. A later outage opens a new incident.
+Set `monitoring.poll_interval` to control how often RabbitMQ and systemd state are collected. Existing configurations using `rabbitmq.poll_interval` remain supported when the new setting is absent. Set `rabbitmq.url`, the read-only RabbitMQ username and password, and the virtual hosts in the protected configuration file. Set SMTP connection details under `[smtp]`, and the email recipients and `reminder_interval` under `[alerts]`. The sample uses a 24-hour reminder interval. Queue `running` and `idle` states clear a queue outage. Zero consumers show as a warning; RabbitMQ state `down`, a missing expected queue, or an unavailable RabbitMQ API creates a critical incident. Each incident emails immediately, sends no repeat on later polls, sends a reminder after 24 hours if still unresolved, and sends a recovery email when it clears. A later outage opens a new incident.
 
 To exercise the queue alert safely in staging, set `rabbitmq.expected_queues = monitoring-alert-test` while that disposable queue is absent. The worker should send a critical alert; creating the test queue should send recovery. To exercise a RabbitMQ source outage, point a staging worker at an unreachable Management API endpoint, then restore the endpoint. Do not stop the production broker or delete a production queue to test notifications.
 

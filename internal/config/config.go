@@ -2,10 +2,12 @@ package config
 
 import (
 	"fmt"
+	"net"
 	"net/mail"
 	"net/url"
 	"path/filepath"
 	"regexp"
+	"strconv"
 	"strings"
 	"time"
 
@@ -13,19 +15,33 @@ import (
 )
 
 type Config struct {
-	Server   ServerConfig
-	Database DatabaseConfig
-	Admin    AdminConfig
-	RabbitMQ RabbitMQConfig
-	Systemd  SystemdConfig
-	SMTP     SMTPConfig
-	Alerts   AlertConfig
+	Server     ServerConfig
+	Database   DatabaseConfig
+	Admin      AdminConfig
+	Monitoring MonitoringConfig
+	RabbitMQ   RabbitMQConfig
+	Systemd    SystemdConfig
+	SMTP       SMTPConfig
+	Alerts     AlertConfig
+}
+
+type MonitoringConfig struct {
+	PollInterval time.Duration
 }
 
 type ServerConfig struct {
+	Host           string
 	Port           int
 	SecureCookies  bool
 	TrustedProxies []string
+}
+
+func (server ServerConfig) Address() string {
+	host := server.Host
+	if host == "" {
+		host = "127.0.0.1"
+	}
+	return net.JoinHostPort(host, strconv.Itoa(server.Port))
 }
 
 type DatabaseConfig struct {
@@ -46,7 +62,6 @@ type RabbitMQConfig struct {
 	VirtualHosts     []string
 	ExpectedQueues   []string
 	ExcludedQueues   []string
-	PollInterval     time.Duration
 	HistoryRetention time.Duration
 }
 
@@ -95,6 +110,7 @@ func Load(path string) (Config, error) {
 	settings := viper.New()
 	settings.SetConfigFile(path)
 	settings.SetConfigType("ini")
+	settings.SetDefault("server.host", "127.0.0.1")
 	settings.SetDefault("server.port", 8080)
 	settings.SetDefault("server.secure_cookies", false)
 	settings.SetDefault("database.path", "./data/moitoring.db")
@@ -102,7 +118,6 @@ func Load(path string) (Config, error) {
 	settings.SetDefault("admin.email", "admin@example.local")
 	settings.SetDefault("admin.is_changed_password", false)
 	settings.SetDefault("rabbitmq.virtual_hosts", "/")
-	settings.SetDefault("rabbitmq.poll_interval", "60s")
 	settings.SetDefault("rabbitmq.history_retention", "24h")
 	settings.SetDefault("smtp.port", 587)
 	settings.SetDefault("smtp.starttls", true)
@@ -115,9 +130,17 @@ func Load(path string) (Config, error) {
 	if err != nil {
 		return Config{}, err
 	}
+	pollInterval := time.Minute
+	if settings.IsSet("rabbitmq.poll_interval") {
+		pollInterval = settings.GetDuration("rabbitmq.poll_interval")
+	}
+	if settings.IsSet("monitoring.poll_interval") {
+		pollInterval = settings.GetDuration("monitoring.poll_interval")
+	}
 
 	config := Config{
 		Server: ServerConfig{
+			Host:           strings.TrimSpace(settings.GetString("server.host")),
 			Port:           settings.GetInt("server.port"),
 			SecureCookies:  settings.GetBool("server.secure_cookies"),
 			TrustedProxies: splitList(settings.GetString("server.trusted_proxies")),
@@ -131,6 +154,9 @@ func Load(path string) (Config, error) {
 			Password:          settings.GetString("admin.password"),
 			IsChangedPassword: settings.GetBool("admin.is_changed_password"),
 		},
+		Monitoring: MonitoringConfig{
+			PollInterval: pollInterval,
+		},
 		RabbitMQ: RabbitMQConfig{
 			URL:              strings.TrimRight(strings.TrimSpace(settings.GetString("rabbitmq.url")), "/"),
 			Username:         strings.TrimSpace(settings.GetString("rabbitmq.username")),
@@ -138,7 +164,6 @@ func Load(path string) (Config, error) {
 			VirtualHosts:     splitList(settings.GetString("rabbitmq.virtual_hosts")),
 			ExpectedQueues:   splitList(settings.GetString("rabbitmq.expected_queues")),
 			ExcludedQueues:   splitList(settings.GetString("rabbitmq.excluded_queues")),
-			PollInterval:     settings.GetDuration("rabbitmq.poll_interval"),
 			HistoryRetention: settings.GetDuration("rabbitmq.history_retention"),
 		},
 		Systemd: SystemdConfig{
@@ -160,8 +185,14 @@ func Load(path string) (Config, error) {
 			ReminderInterval: settings.GetDuration("alerts.reminder_interval"),
 		},
 	}
+	if config.Server.Host == "" {
+		config.Server.Host = "127.0.0.1"
+	}
 	if config.Server.Port < 1 || config.Server.Port > 65535 {
 		return Config{}, fmt.Errorf("server.port must be between 1 and 65535: %d", config.Server.Port)
+	}
+	if config.Monitoring.PollInterval <= 0 {
+		return Config{}, fmt.Errorf("monitoring.poll_interval must be greater than zero")
 	}
 	if config.Database.Path == "" {
 		return Config{}, fmt.Errorf("database.path cannot be empty")
@@ -180,9 +211,6 @@ func (config Config) ValidateWorker() error {
 	}
 	if len(config.RabbitMQ.VirtualHosts) == 0 {
 		return fmt.Errorf("rabbitmq.virtual_hosts must contain at least one virtual host")
-	}
-	if config.RabbitMQ.PollInterval <= 0 {
-		return fmt.Errorf("rabbitmq.poll_interval must be greater than zero")
 	}
 	if config.RabbitMQ.HistoryRetention <= 0 {
 		return fmt.Errorf("rabbitmq.history_retention must be greater than zero")

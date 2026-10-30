@@ -16,6 +16,9 @@ func TestLoadINIExample(t *testing.T) {
 	if config.Server.Port != 8080 {
 		t.Errorf("server port = %d, want 8080", config.Server.Port)
 	}
+	if config.Server.Host != "127.0.0.1" {
+		t.Errorf("server host = %q, want loopback", config.Server.Host)
+	}
 	if config.Server.SecureCookies {
 		t.Error("server secure cookies = true, want false for the local HTTP example")
 	}
@@ -37,14 +40,69 @@ func TestLoadINIExample(t *testing.T) {
 	if !config.Admin.IsChangedPassword {
 		t.Error("admin is_changed_password = false, want true in the example")
 	}
-	if config.RabbitMQ.URL != "http://127.0.0.1:15672" || config.RabbitMQ.PollInterval != time.Minute {
-		t.Errorf("RabbitMQ settings = (%q, %s), want example URL and 1m interval", config.RabbitMQ.URL, config.RabbitMQ.PollInterval)
+	if config.RabbitMQ.URL != "http://127.0.0.1:15672" {
+		t.Errorf("RabbitMQ URL = %q, want example URL", config.RabbitMQ.URL)
+	}
+	if config.Monitoring.PollInterval != time.Minute {
+		t.Errorf("monitoring poll interval = %s, want 1m", config.Monitoring.PollInterval)
 	}
 	if len(config.Systemd.Units) != 0 {
 		t.Errorf("systemd units = %v, want no units in the example configuration", config.Systemd.Units)
 	}
 	if config.Alerts.ReminderInterval != 24*time.Hour || len(config.Alerts.Recipients) != 1 {
 		t.Errorf("alert settings = (%s, %v), want 24h and one recipient", config.Alerts.ReminderInterval, config.Alerts.Recipients)
+	}
+}
+
+func TestLoadMonitoringPollInterval(t *testing.T) {
+	tests := []struct {
+		name    string
+		content string
+		want    time.Duration
+		wantErr bool
+	}{
+		{name: "default", want: time.Minute},
+		{name: "legacy RabbitMQ setting", content: "[rabbitmq]\npoll_interval = 35s\n", want: 35 * time.Second},
+		{name: "monitoring setting takes precedence", content: "[rabbitmq]\npoll_interval = 35s\n[monitoring]\npoll_interval = 45s\n", want: 45 * time.Second},
+		{name: "reject nonpositive interval", content: "[monitoring]\npoll_interval = 0s\n", wantErr: true},
+	}
+	for _, test := range tests {
+		t.Run(test.name, func(t *testing.T) {
+			path := filepath.Join(t.TempDir(), "config.ini")
+			if err := os.WriteFile(path, []byte(test.content), 0o600); err != nil {
+				t.Fatalf("write config: %v", err)
+			}
+			config, err := Load(path)
+			if test.wantErr {
+				if err == nil {
+					t.Fatal("Load() error = nil, want invalid monitoring interval error")
+				}
+				return
+			}
+			if err != nil {
+				t.Fatalf("Load() error = %v", err)
+			}
+			if config.Monitoring.PollInterval != test.want {
+				t.Errorf("monitoring poll interval = %s, want %s", config.Monitoring.PollInterval, test.want)
+			}
+		})
+	}
+}
+
+func TestServerConfigAddress(t *testing.T) {
+	for _, test := range []struct {
+		host string
+		want string
+	}{
+		{host: "127.0.0.1", want: "127.0.0.1:8080"},
+		{host: "0.0.0.0", want: "0.0.0.0:8080"},
+		{host: "::", want: "[::]:8080"},
+		{host: "", want: "127.0.0.1:8080"},
+	} {
+		settings := ServerConfig{Host: test.host, Port: 8080}
+		if got := settings.Address(); got != test.want {
+			t.Errorf("Address() with host %q = %q, want %q", test.host, got, test.want)
+		}
 	}
 }
 
