@@ -39,13 +39,23 @@ If the firewall uses UFW, allow the port with `sudo ufw allow 8080/tcp`. Direct 
 
 The app reads its port and SQLite path from `config.ini`. `config.ini.example` contains the starter settings; if `config.ini` is missing in a fresh checkout, copy the example with `cp config.ini.example config.ini`. Viper is pinned to 1.19 because Viper 1.20 removed INI decoding.
 
-By default, `serve` and `worker` search the current directory and its parent directories for `config.ini.example`, then use the `config.ini` beside it. Pass `--config /absolute/path/to/config.ini` to select another file, such as from a systemd unit.
+By default, `serve`, `worker`, and `tui` search the current directory and its parent directories for `config.ini.example`, then use the `config.ini` beside it. Pass `--config /absolute/path/to/config.ini` to select another file, such as from a systemd unit.
 
 Start the Gin API:
 
 ```sh
 go run ./cmd serve
 ```
+
+Open the read-only terminal dashboard:
+
+```sh
+go run ./cmd tui
+```
+
+Use the left and right arrows or `1`–`3` to switch between Overview, RabbitMQ queues, and Systemd workers. In either list, press `/` to search; queue search matches names, while worker search matches host, unit, and state. Press `s` to cycle status filters, `v` to cycle queue vhosts, and `c` to clear filters. Search updates as you type; Enter keeps it and Escape restores the previous search. Press `r` to refresh or `q` to exit. The dashboard refreshes automatically at the configured monitoring poll interval.
+
+Set `server.web_ui_enabled = false` in `config.ini` to disable the browser UI while leaving the HTTP API and health endpoint available. The terminal dashboard can run without starting the HTTP server.
 
 The first start creates `./data/moitoring.db`, applies the versioned schema, and creates the configured admin user if that username is missing. Its password is stored as a bcrypt hash. Existing usernames are left unchanged. Replace the sample admin password in `config.ini` before using this outside local development. To override the configured port, use `go run ./cmd/moitoring serve -p 8081`.
 

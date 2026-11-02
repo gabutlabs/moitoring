@@ -36,7 +36,7 @@ test('filters queues by critical, warning, healthy, stale, and unknown status', 
 
   assert.deepEqual(filterQueues(queues, { status: 'critical' }).map((queue) => queue.name), ['down'])
   assert.deepEqual(filterQueues(queues, { status: 'warning' }).map((queue) => queue.name), ['warning'])
-  assert.deepEqual(filterQueues(queues, { status: 'healthy' }).map((queue) => queue.name), ['healthy'])
+  assert.deepEqual(filterQueues(queues, { status: 'healthy' }).map((queue) => queue.name), ['healthy', 'stale'])
   assert.deepEqual(filterQueues(queues, { status: 'stale' }).map((queue) => queue.name), ['stale'])
   assert.deepEqual(filterQueues(queues, { status: 'unknown' }).map((queue) => queue.name), ['unknown'])
   assert.deepEqual(

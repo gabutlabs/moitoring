@@ -8,6 +8,6 @@ func newRootCommand() *cobra.Command {
 		Short:        "Monitor systemd workers and RabbitMQ queues",
 		SilenceUsage: true,
 	}
-	root.AddCommand(newServeCommand(), newWorkerCommand())
+	root.AddCommand(newServeCommand(), newWorkerCommand(), newTUICommand())
 	return root
 }

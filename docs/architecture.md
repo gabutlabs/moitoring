@@ -24,6 +24,7 @@ internal/
   config/                  # configuration loading and settings types
   handler/                 # HTTP request and response handling
   services/                # validation and business workflows
+  tui/                     # Bubble Tea read-only terminal dashboard
   repository/
     sqlite/                # SQLite connection, migrations, and queries
   models/                  # shared domain and persistence field definitions
@@ -33,6 +34,7 @@ cmd/
   root_test.go            # root command tests
   serve.go                # serve command, Gin setup, and frontend route wiring
   worker.go               # worker command and worker startup
+  tui.go                  # TUI command and monitoring dependency wiring
 docs/
   architecture.md
 ```
@@ -43,10 +45,10 @@ Keep application code under `internal/` so other Go modules cannot import it dir
 
 ## Technology Stack
 
-- Go provides the backend and Cobra provides the `serve` and `worker` CLI commands.
+- Go provides the backend; Cobra provides the `serve`, `worker`, and `tui` CLI commands; Bubble Tea renders the terminal dashboard.
 - Gin handles HTTP routing. `cmd/serve.go` creates the Gin engine and wires routes; API handlers live in `internal/handler`.
 - Vue 3 with Nuxt UI for Vue provides the frontend. Use the current stable packages when setting up the project and commit its package-manager lockfile so builds use reproducible versions.
-- SQLite stores application data in one persistent local database file, configured in `config.ini` and shared by the `serve` and `worker` commands.
+- SQLite stores application data in one persistent local database file, configured in `config.ini` and shared by the `serve`, `worker`, and `tui` commands.
 
 ## Command-Line Interface
 
@@ -55,9 +57,10 @@ Use Cobra commands to select and start application modes. The root command regis
 ```sh
 moitoring serve -p 8080
 moitoring worker
+moitoring tui
 ```
 
-The `serve` command loads configuration, constructs its dependencies, configures Gin, and starts the HTTP server. The `worker` command loads configuration and starts background processing. Cobra command functions handle flags and application startup; keep business rules in services.
+The `serve` command loads configuration, constructs its dependencies, configures Gin, and starts the HTTP server. The `server.web_ui_enabled` setting controls whether Gin serves the embedded browser UI; API and health routes remain available when it is false. The `worker` command loads configuration and starts background processing. The `tui` command loads the same configuration and database, then renders read-only snapshots through the monitoring query service without requiring the HTTP server. Cobra command functions handle flags and application startup; keep business rules in services.
 
 ## Frontend Build and Embedded Serving
 

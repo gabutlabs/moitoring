@@ -31,6 +31,16 @@ func TestRootCommandRegistersWorker(t *testing.T) {
 	}
 }
 
+func TestRootCommandRegistersTUI(t *testing.T) {
+	command, _, err := newRootCommand().Find([]string{"tui"})
+	if err != nil {
+		t.Fatalf("Find(tui) error = %v", err)
+	}
+	if command.Use != "tui" {
+		t.Fatalf("tui command = %q, want %q", command.Use, "tui")
+	}
+}
+
 func TestProjectConfigPathFindsProjectRootFromNestedDirectory(t *testing.T) {
 	project := t.TempDir()
 	commandDirectory := filepath.Join(project, "cmd", "nested")

@@ -82,7 +82,7 @@ func runServer(settings config.Config, configPath string) error {
 	authHandler.Register(api)
 	monitoringHandler.Register(api)
 	api.GET("/health", handler.Health)
-	router.NoRoute(gin.WrapH(webassets.Handler()))
+	registerWebUI(router, settings.Server.WebUIEnabled)
 
 	server := &http.Server{
 		Addr:              settings.Server.Address(),
@@ -93,4 +93,10 @@ func runServer(settings config.Config, configPath string) error {
 		return err
 	}
 	return nil
+}
+
+func registerWebUI(router *gin.Engine, enabled bool) {
+	if enabled {
+		router.NoRoute(gin.WrapH(webassets.Handler()))
+	}
 }

@@ -32,6 +32,7 @@ type MonitoringConfig struct {
 type ServerConfig struct {
 	Host           string
 	Port           int
+	WebUIEnabled   bool
 	SecureCookies  bool
 	TrustedProxies []string
 }
@@ -112,6 +113,7 @@ func Load(path string) (Config, error) {
 	settings.SetConfigType("ini")
 	settings.SetDefault("server.host", "127.0.0.1")
 	settings.SetDefault("server.port", 8080)
+	settings.SetDefault("server.web_ui_enabled", true)
 	settings.SetDefault("server.secure_cookies", false)
 	settings.SetDefault("database.path", "./data/moitoring.db")
 	settings.SetDefault("admin.username", "admin")
@@ -142,6 +144,7 @@ func Load(path string) (Config, error) {
 		Server: ServerConfig{
 			Host:           strings.TrimSpace(settings.GetString("server.host")),
 			Port:           settings.GetInt("server.port"),
+			WebUIEnabled:   settings.GetBool("server.web_ui_enabled"),
 			SecureCookies:  settings.GetBool("server.secure_cookies"),
 			TrustedProxies: splitList(settings.GetString("server.trusted_proxies")),
 		},

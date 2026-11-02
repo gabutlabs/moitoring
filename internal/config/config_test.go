@@ -16,6 +16,9 @@ func TestLoadINIExample(t *testing.T) {
 	if config.Server.Port != 8080 {
 		t.Errorf("server port = %d, want 8080", config.Server.Port)
 	}
+	if !config.Server.WebUIEnabled {
+		t.Error("server web UI enabled = false, want true in the example")
+	}
 	if config.Server.Host != "127.0.0.1" {
 		t.Errorf("server host = %q, want loopback", config.Server.Host)
 	}
@@ -51,6 +54,32 @@ func TestLoadINIExample(t *testing.T) {
 	}
 	if config.Alerts.ReminderInterval != 24*time.Hour || len(config.Alerts.Recipients) != 1 {
 		t.Errorf("alert settings = (%s, %v), want 24h and one recipient", config.Alerts.ReminderInterval, config.Alerts.Recipients)
+	}
+}
+
+func TestLoadWebUISettingDefaultsEnabledAndCanBeDisabled(t *testing.T) {
+	for _, test := range []struct {
+		name    string
+		content string
+		want    bool
+	}{
+		{name: "default", want: true},
+		{name: "enabled", content: "[server]\nweb_ui_enabled = true\n", want: true},
+		{name: "disabled", content: "[server]\nweb_ui_enabled = false\n", want: false},
+	} {
+		t.Run(test.name, func(t *testing.T) {
+			path := filepath.Join(t.TempDir(), "config.ini.example")
+			if err := os.WriteFile(path, []byte(test.content), 0o600); err != nil {
+				t.Fatalf("write example config: %v", err)
+			}
+			settings, err := Load(path)
+			if err != nil {
+				t.Fatalf("Load() error = %v", err)
+			}
+			if settings.Server.WebUIEnabled != test.want {
+				t.Errorf("web UI enabled = %t, want %t", settings.Server.WebUIEnabled, test.want)
+			}
+		})
 	}
 }
 

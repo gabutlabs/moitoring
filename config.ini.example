@@ -2,6 +2,8 @@
 # Use 0.0.0.0 for direct network access; keep loopback behind a reverse proxy.
 host = 127.0.0.1
 port = 8080
+# Set false to keep the API available without serving the browser UI.
+web_ui_enabled = true
 # Enable when browsers access the application over HTTPS.
 secure_cookies = false
 # List only trusted reverse proxy IPs/CIDRs; leave empty when there is no proxy.

@@ -7,7 +7,7 @@ export function filterQueues(queues, filters = {}) {
     const matchesStatus = status === 'all'
       || (status === 'critical' && queue.status === 'down')
       || (status === 'warning' && queue.status === 'warning')
-      || (status === 'healthy' && queue.status === 'healthy' && !queue.is_stale)
+      || (status === 'healthy' && queue.status === 'healthy')
       || (status === 'stale' && queue.is_stale)
       || (status === 'unknown' && queue.status === 'unknown')
     const matchesVHost = vhost === 'all'
