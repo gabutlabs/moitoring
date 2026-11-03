@@ -4,6 +4,7 @@ import (
 	"context"
 	"database/sql"
 	"path/filepath"
+	"strings"
 	"sync"
 	"testing"
 	"time"
@@ -162,6 +163,54 @@ func TestAlertIncidentDeduplicatesUntilRecoveryAndRemindsDaily(t *testing.T) {
 	}
 	if count := notificationCount(t, db); count != 4 {
 		t.Fatalf("notifications after recovery and re-open = %d, want 4", count)
+	}
+}
+
+func TestNotificationsBatchMatchingEventsAndDailyReminders(t *testing.T) {
+	db, err := Open(context.Background(), filepath.Join(t.TempDir(), "notification-batches.db"))
+	if err != nil {
+		t.Fatalf("Open() error = %v", err)
+	}
+	defer db.Close()
+	repository := NewMonitoringRepository(db)
+	start := time.Date(2026, time.October, 28, 10, 30, 0, 0, time.UTC)
+	recipients := []string{"ops@example.local"}
+
+	for _, incident := range []struct {
+		key, kind, target, title, details string
+	}{
+		{"queue:jobs", "rabbitmq_queue", "/jobs", "Queue jobs is down", "Reason: RabbitMQ returned down."},
+		{"worker:jobs", "systemd_worker", "worker-a/jobs.service", "Worker jobs.service is down", "Reason: systemd reports failed."},
+	} {
+		opened, err := repository.OpenIncident(context.Background(), incident.key, incident.kind, incident.target, incident.title, incident.details, recipients, start)
+		if err != nil || !opened {
+			t.Fatalf("OpenIncident(%q) = (%t, %v), want opened", incident.key, opened, err)
+		}
+	}
+	if count := notificationCount(t, db); count != 1 {
+		t.Fatalf("notifications for two outages = %d, want one grouped email", count)
+	}
+	claimed, err := repository.ClaimDueNotifications(context.Background(), start, 10)
+	if err != nil || len(claimed) != 1 {
+		t.Fatalf("ClaimDueNotifications() = (%d notifications, %v), want one grouped email", len(claimed), err)
+	}
+	if claimed[0].Subject != "Monitoring alert: 2 issues" || !strings.Contains(claimed[0].Body, "Queue jobs is down") || !strings.Contains(claimed[0].Body, "Worker jobs.service is down") || !strings.Contains(claimed[0].Body, "systemd reports failed") {
+		t.Fatalf("grouped outage email = %+v, want both incident reasons", claimed[0])
+	}
+	if err := repository.MarkNotificationSent(context.Background(), claimed[0].ID, claimed[0].ClaimToken, start); err != nil {
+		t.Fatalf("MarkNotificationSent() error = %v", err)
+	}
+
+	reminderAt := start.Add(24 * time.Hour)
+	if err := repository.QueueDueReminders(context.Background(), reminderAt, 24*time.Hour, recipients); err != nil {
+		t.Fatalf("QueueDueReminders() error = %v", err)
+	}
+	claimed, err = repository.ClaimDueNotifications(context.Background(), reminderAt, 10)
+	if err != nil || len(claimed) != 1 {
+		t.Fatalf("ClaimDueNotifications() for reminders = (%d notifications, %v), want one grouped reminder", len(claimed), err)
+	}
+	if claimed[0].Subject != "Still down: 2 issues" || !strings.Contains(claimed[0].Body, "RabbitMQ returned down") || !strings.Contains(claimed[0].Body, "systemd reports failed") {
+		t.Fatalf("grouped reminder email = %+v, want both active incident reasons", claimed[0])
 	}
 }
 
@@ -339,6 +388,8 @@ func dropNotificationClaimSchema(t *testing.T, db *sql.DB) {
 		`DROP INDEX notification_outbox_claim_idx`,
 		`ALTER TABLE notification_outbox DROP COLUMN claim_token`,
 		`ALTER TABLE notification_outbox DROP COLUMN claimed_at`,
+		`DROP INDEX notification_outbox_batch_idx`,
+		`ALTER TABLE notification_outbox DROP COLUMN item_count`,
 	} {
 		if _, err := db.Exec(statement); err != nil {
 			t.Fatalf("restore pre-claim notification schema with %q: %v", statement, err)

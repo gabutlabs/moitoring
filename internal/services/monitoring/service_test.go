@@ -142,6 +142,59 @@ func TestDownReminderRecoveryAndNewDownTransition(t *testing.T) {
 	}
 }
 
+func TestQueueAndWorkerOutagesShareOneEmailAndReopenAlertsAgain(t *testing.T) {
+	db, err := sqlite.Open(context.Background(), filepath.Join(t.TempDir(), "batched-alerts.db"))
+	if err != nil {
+		t.Fatalf("Open() error = %v", err)
+	}
+	defer db.Close()
+	queueKey := models.QueueKey{VHost: "/", Name: "jobs"}
+	workerTarget := models.WorkerTarget{Host: "worker-a", Unit: "jobs.service", ExpectedState: "active"}
+	collector := &testCollector{queues: []models.QueueObservation{{QueueKey: queueKey, State: "down"}}}
+	workerCollector := &simulatedWorkerCollector{workers: []models.WorkerObservation{{Unit: workerTarget.Unit, ActiveState: "failed", SubState: "failed", Result: "exit-code"}}}
+	sender := &recordingSender{}
+	service := NewService(collector, sqlite.NewMonitoringRepository(db), sender, Settings{
+		PollInterval:     time.Minute,
+		HistoryRetention: 24 * time.Hour,
+		ReminderInterval: 24 * time.Hour,
+		Recipients:       []string{"ops@example.local"},
+		ExpectedQueues:   []models.QueueKey{queueKey},
+		WorkerCollector:  workerCollector,
+		Workers:          []models.WorkerTarget{workerTarget},
+	})
+	now := time.Date(2026, time.October, 28, 10, 30, 0, 0, time.UTC)
+	service.now = func() time.Time { return now }
+
+	if err := service.poll(context.Background()); err != nil {
+		t.Fatalf("first poll error = %v", err)
+	}
+	if len(sender.notifications) != 1 {
+		t.Fatalf("emails after simultaneous queue and worker outages = %d, want one", len(sender.notifications))
+	}
+	alert := sender.notifications[0]
+	if alert.Subject != "Monitoring alert: 2 issues" || !strings.Contains(alert.Body, "RabbitMQ queue is down") || !strings.Contains(alert.Body, "Worker: jobs.service on worker-a") || !strings.Contains(alert.Body, "Result: exit-code") {
+		t.Fatalf("grouped outage email = %+v, want the queue, worker, and reasons", alert)
+	}
+
+	workerCollector.workers[0].ActiveState = "active"
+	now = now.Add(time.Minute)
+	if err := service.poll(context.Background()); err != nil {
+		t.Fatalf("worker recovery poll error = %v", err)
+	}
+	if len(sender.notifications) != 2 || !strings.Contains(sender.notifications[1].Subject, "Recovered") && !strings.Contains(sender.notifications[1].Subject, "recovery") {
+		t.Fatalf("emails after worker recovery = %+v, want one recovery notification", sender.notifications)
+	}
+
+	workerCollector.workers[0].ActiveState = "failed"
+	now = now.Add(time.Minute)
+	if err := service.poll(context.Background()); err != nil {
+		t.Fatalf("worker re-outage poll error = %v", err)
+	}
+	if len(sender.notifications) != 3 || sender.notifications[2].Subject != "Systemd worker is not in its expected state" {
+		t.Fatalf("emails after worker re-outage = %+v, want a new immediate alert", sender.notifications)
+	}
+}
+
 func TestConcurrentWorkersSendOneClaimedNotification(t *testing.T) {
 	path := filepath.Join(t.TempDir(), "monitoring.db")
 	dbA, err := sqlite.Open(context.Background(), path)

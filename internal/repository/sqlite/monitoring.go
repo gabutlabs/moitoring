@@ -404,14 +404,58 @@ func insertNotification(ctx context.Context, tx *sql.Tx, key, event string, reci
 	if err != nil {
 		return fmt.Errorf("encode alert recipients: %w", err)
 	}
+	createdAt := now.UTC().UnixNano()
+	var id int64
+	var itemCount int
+	var existingSubject, existingBody string
+	// A single polling cycle uses one timestamp, so it acts as the email batch key.
+	err = tx.QueryRowContext(ctx, `
+		SELECT id, item_count, subject, body FROM notification_outbox
+		WHERE event = ? AND recipients = ? AND created_at = ? AND status = 'queued'
+		ORDER BY id LIMIT 1
+	`, event, string(recipientJSON), createdAt).Scan(&id, &itemCount, &existingSubject, &existingBody)
+	if err == nil {
+		itemCount++
+		if itemCount == 2 {
+			existingBody = formatNotificationItem(1, existingSubject, existingBody)
+		}
+		if _, err := tx.ExecContext(ctx, `
+			UPDATE notification_outbox
+			SET item_count = ?, subject = ?, body = ?
+			WHERE id = ? AND status = 'queued'
+		`, itemCount, batchNotificationSubject(event, itemCount), existingBody+"\n\n"+formatNotificationItem(itemCount, subject, body), id); err != nil {
+			return fmt.Errorf("combine alert email: %w", err)
+		}
+		return nil
+	}
+	if err != sql.ErrNoRows {
+		return fmt.Errorf("find alert email batch: %w", err)
+	}
 	_, err = tx.ExecContext(ctx, `
-		INSERT INTO notification_outbox (alert_key, event, recipients, subject, body, next_attempt_at, created_at)
-		VALUES (?, ?, ?, ?, ?, ?, ?)
-	`, key, event, string(recipientJSON), subject, body, now.UTC().UnixNano(), now.UTC().UnixNano())
+		INSERT INTO notification_outbox (alert_key, event, recipients, subject, body, next_attempt_at, created_at, item_count)
+		VALUES (?, ?, ?, ?, ?, ?, ?, 1)
+	`, key, event, string(recipientJSON), subject, body, createdAt, createdAt)
 	if err != nil {
 		return fmt.Errorf("queue alert email: %w", err)
 	}
 	return nil
+}
+
+func formatNotificationItem(number int, subject, body string) string {
+	return fmt.Sprintf("[%d] %s\n%s", number, subject, body)
+}
+
+func batchNotificationSubject(event string, count int) string {
+	switch event {
+	case "opened":
+		return fmt.Sprintf("Monitoring alert: %d issues", count)
+	case "recovered":
+		return fmt.Sprintf("Monitoring recovery: %d issues", count)
+	case "reminder":
+		return fmt.Sprintf("Still down: %d issues", count)
+	default:
+		return fmt.Sprintf("Monitoring update: %d issues", count)
+	}
 }
 
 const notificationClaimLease = time.Minute

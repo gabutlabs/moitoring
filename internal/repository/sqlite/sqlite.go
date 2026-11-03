@@ -13,7 +13,7 @@ import (
 	_ "modernc.org/sqlite"
 )
 
-const currentSchemaVersion = 8
+const currentSchemaVersion = 9
 
 func Open(ctx context.Context, path string) (*sql.DB, error) {
 	path = strings.TrimSpace(path)
@@ -254,6 +254,17 @@ func migrate(ctx context.Context, db *sql.DB) (retErr error) {
 			return fmt.Errorf("index notification claims: %w", err)
 		}
 		if _, err := conn.ExecContext(ctx, "PRAGMA user_version = 8"); err != nil {
+			return fmt.Errorf("set schema version: %w", err)
+		}
+	}
+	if version < 9 {
+		if _, err := conn.ExecContext(ctx, `ALTER TABLE notification_outbox ADD COLUMN item_count INTEGER NOT NULL DEFAULT 1`); err != nil {
+			return fmt.Errorf("add notification batch count: %w", err)
+		}
+		if _, err := conn.ExecContext(ctx, `CREATE INDEX notification_outbox_batch_idx ON notification_outbox(event, created_at, status)`); err != nil {
+			return fmt.Errorf("index notification batches: %w", err)
+		}
+		if _, err := conn.ExecContext(ctx, "PRAGMA user_version = 9"); err != nil {
 			return fmt.Errorf("set schema version: %w", err)
 		}
 	}
