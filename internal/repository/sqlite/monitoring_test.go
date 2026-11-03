@@ -139,13 +139,13 @@ func TestAlertIncidentDeduplicatesUntilRecoveryAndRemindsDaily(t *testing.T) {
 		t.Fatalf("repeated OpenIncident() = (%t, %v), want no duplicate", opened, err)
 	}
 
-	if err := repository.QueueDueReminders(context.Background(), start.Add(time.Minute), 24*time.Hour, recipients); err != nil {
+	if err := repository.QueueDueReminders(context.Background(), start.Add(time.Minute), 24*time.Hour, recipients, nil); err != nil {
 		t.Fatalf("QueueDueReminders() before 24h error = %v", err)
 	}
 	if count := notificationCount(t, db); count != 1 {
 		t.Fatalf("notifications before reminder = %d, want 1", count)
 	}
-	if err := repository.QueueDueReminders(context.Background(), start.Add(24*time.Hour), 24*time.Hour, recipients); err != nil {
+	if err := repository.QueueDueReminders(context.Background(), start.Add(24*time.Hour), 24*time.Hour, recipients, nil); err != nil {
 		t.Fatalf("QueueDueReminders() after 24h error = %v", err)
 	}
 	if count := notificationCount(t, db); count != 2 {
@@ -202,7 +202,7 @@ func TestNotificationsBatchMatchingEventsAndDailyReminders(t *testing.T) {
 	}
 
 	reminderAt := start.Add(24 * time.Hour)
-	if err := repository.QueueDueReminders(context.Background(), reminderAt, 24*time.Hour, recipients); err != nil {
+	if err := repository.QueueDueReminders(context.Background(), reminderAt, 24*time.Hour, recipients, nil); err != nil {
 		t.Fatalf("QueueDueReminders() error = %v", err)
 	}
 	claimed, err = repository.ClaimDueNotifications(context.Background(), reminderAt, 10)
@@ -211,6 +211,49 @@ func TestNotificationsBatchMatchingEventsAndDailyReminders(t *testing.T) {
 	}
 	if claimed[0].Subject != "Still down: 2 issues" || !strings.Contains(claimed[0].Body, "RabbitMQ returned down") || !strings.Contains(claimed[0].Body, "systemd reports failed") {
 		t.Fatalf("grouped reminder email = %+v, want both active incident reasons", claimed[0])
+	}
+}
+
+func TestQueueRemindersRespectConfiguredTargets(t *testing.T) {
+	db, err := Open(context.Background(), filepath.Join(t.TempDir(), "filtered-reminders.db"))
+	if err != nil {
+		t.Fatalf("Open() error = %v", err)
+	}
+	defer db.Close()
+	repository := NewMonitoringRepository(db)
+	start := time.Date(2026, time.October, 28, 10, 30, 0, 0, time.UTC)
+	recipients := []string{"ops@example.local"}
+
+	for _, incident := range []struct {
+		key, kind, target, title, details string
+	}{
+		{"queue:jobs", "rabbitmq_queue", "/jobs", "Queue jobs is down", "jobs reason"},
+		{"queue:orders", "rabbitmq_queue", "/orders", "Queue orders is down", "orders reason"},
+		{"worker:jobs", "systemd_worker", "worker-a/jobs.service", "Worker jobs.service is down", "worker reason"},
+	} {
+		if _, err := repository.OpenIncident(context.Background(), incident.key, incident.kind, incident.target, incident.title, incident.details, recipients, start); err != nil {
+			t.Fatalf("OpenIncident(%q): %v", incident.key, err)
+		}
+	}
+	opened, err := repository.ClaimDueNotifications(context.Background(), start, 10)
+	if err != nil || len(opened) != 1 {
+		t.Fatalf("ClaimDueNotifications() for opened incidents = (%d notifications, %v), want one batch", len(opened), err)
+	}
+	if err := repository.MarkNotificationSent(context.Background(), opened[0].ID, opened[0].ClaimToken, start); err != nil {
+		t.Fatalf("MarkNotificationSent() for opened incidents: %v", err)
+	}
+
+	reminderAt := start.Add(24 * time.Hour)
+	if err := repository.QueueDueReminders(context.Background(), reminderAt, 24*time.Hour, recipients, []string{"queue:jobs"}); err != nil {
+		t.Fatalf("QueueDueReminders() error = %v", err)
+	}
+	reminders, err := repository.ClaimDueNotifications(context.Background(), reminderAt, 10)
+	if err != nil || len(reminders) != 1 {
+		t.Fatalf("ClaimDueNotifications() for reminders = (%d notifications, %v), want one batch", len(reminders), err)
+	}
+	reminder := reminders[0]
+	if reminder.Subject != "Still down: 2 issues" || !strings.Contains(reminder.Body, "jobs reason") || strings.Contains(reminder.Body, "orders reason") || !strings.Contains(reminder.Body, "worker reason") {
+		t.Fatalf("filtered reminder = %+v, want the selected queue and worker only", reminder)
 	}
 }
 

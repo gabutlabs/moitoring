@@ -336,19 +336,28 @@ func (r MonitoringRepository) ActiveIncidentKeys(ctx context.Context) (map[strin
 	return keys, nil
 }
 
-func (r MonitoringRepository) QueueDueReminders(ctx context.Context, now time.Time, interval time.Duration, recipients []string) error {
+func (r MonitoringRepository) QueueDueReminders(ctx context.Context, now time.Time, interval time.Duration, recipients, queueAlertKeys []string) error {
 	tx, err := r.db.BeginTx(ctx, nil)
 	if err != nil {
 		return fmt.Errorf("begin alert reminder transaction: %w", err)
 	}
 	defer tx.Rollback()
+	allowedQueueKeys, err := json.Marshal(queueAlertKeys)
+	if err != nil {
+		return fmt.Errorf("encode monitored queue alert keys: %w", err)
+	}
+	queueFilterEnabled := 0
+	if queueAlertKeys != nil {
+		queueFilterEnabled = 1
+	}
 
 	rows, err := tx.QueryContext(ctx, `
 		SELECT alert_key, title, details, opened_at, last_notified_at
 		FROM alert_incidents
 		WHERE active = 1 AND last_notified_at <= ?
+		  AND (? = 0 OR kind != 'rabbitmq_queue' OR alert_key IN (SELECT value FROM json_each(?)))
 		ORDER BY last_notified_at
-	`, now.Add(-interval).UTC().UnixNano())
+	`, now.Add(-interval).UTC().UnixNano(), queueFilterEnabled, string(allowedQueueKeys))
 	if err != nil {
 		return fmt.Errorf("find due alert reminders: %w", err)
 	}

@@ -38,6 +38,7 @@ func runTUI(command *cobra.Command, configPath string) error {
 
 	reader := monitoringservice.NewQueryService(
 		sqlite.NewMonitoringRepository(db), settings.Monitoring.PollInterval, settings.RabbitMQ.ExcludedQueues,
+		configuredQueueKeys(settings.RabbitMQ.VirtualHosts, settings.RabbitMQ.ExpectedQueues),
 	)
 	return tui.Run(command.Context(), reader, settings.Monitoring.PollInterval)
 }

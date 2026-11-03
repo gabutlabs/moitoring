@@ -30,7 +30,7 @@ type Store interface {
 	OpenIncident(context.Context, string, string, string, string, string, []string, time.Time) (bool, error)
 	ResolveIncident(context.Context, string, string, string, []string, time.Time) (bool, error)
 	ActiveIncidentKeys(context.Context) (map[string]struct{}, error)
-	QueueDueReminders(context.Context, time.Time, time.Duration, []string) error
+	QueueDueReminders(context.Context, time.Time, time.Duration, []string, []string) error
 	ClaimDueNotifications(context.Context, time.Time, int) ([]models.Notification, error)
 	MarkNotificationSent(context.Context, int64, string, time.Time) error
 	MarkNotificationFailed(context.Context, int64, string, int, time.Time, string, int) error
@@ -88,7 +88,11 @@ func (s *Service) Run(ctx context.Context) error {
 }
 
 func (s *Service) Snapshot(ctx context.Context) (models.MonitoringSnapshot, error) {
-	return s.store.Snapshot(ctx, s.now().UTC(), 2*s.settings.PollInterval, s.settings.ExcludedQueues)
+	snapshot, err := s.store.Snapshot(ctx, s.now().UTC(), 2*s.settings.PollInterval, s.settings.ExcludedQueues)
+	if err != nil {
+		return models.MonitoringSnapshot{}, err
+	}
+	return filterConfiguredQueues(snapshot, s.expectedQueueKeys()), nil
 }
 
 func (s *Service) poll(ctx context.Context) error {
@@ -111,13 +115,22 @@ func (s *Service) poll(ctx context.Context) error {
 		return s.finishPoll(ctx, now)
 	}
 
-	knownQueues, err := s.store.KnownQueues(ctx)
-	if err != nil {
-		return err
+	expectedQueues := s.expectedQueueKeys()
+	monitorConfiguredQueues := len(expectedQueues) > 0
+	var knownQueues []models.QueueKey
+	if !monitorConfiguredQueues {
+		knownQueues, err = s.store.KnownQueues(ctx)
+		if err != nil {
+			return err
+		}
 	}
 	excluded := make(map[string]struct{}, len(s.settings.ExcludedQueues))
 	for _, name := range s.settings.ExcludedQueues {
 		excluded[name] = struct{}{}
+	}
+	configured := make(map[string]struct{}, len(expectedQueues))
+	for _, key := range expectedQueues {
+		configured[queueID(key)] = struct{}{}
 	}
 	filtered := make([]models.QueueObservation, 0, len(queues))
 	seen := make(map[string]struct{}, len(queues))
@@ -127,6 +140,11 @@ func (s *Service) poll(ctx context.Context) error {
 			continue
 		}
 		key := queueID(queue.QueueKey)
+		if monitorConfiguredQueues {
+			if _, monitor := configured[key]; !monitor {
+				continue
+			}
+		}
 		if _, duplicate := seen[key]; duplicate {
 			continue
 		}
@@ -150,7 +168,7 @@ func (s *Service) poll(ctx context.Context) error {
 		current[queueID(queue.QueueKey)] = queue
 	}
 	missingHandled := make(map[string]struct{})
-	for _, key := range s.expectedQueueKeys() {
+	for _, key := range expectedQueues {
 		if _, ok := current[queueID(key)]; !ok {
 			if _, skip := excluded[key.Name]; !skip {
 				if err := s.markQueueDown(ctx, key, "expected queue was not returned by a successful RabbitMQ listing", now); err != nil {
@@ -160,16 +178,18 @@ func (s *Service) poll(ctx context.Context) error {
 			}
 		}
 	}
-	for _, key := range knownQueues {
-		if _, skip := excluded[key.Name]; skip {
-			continue
-		}
-		if _, ok := current[queueID(key)]; !ok {
-			if _, handled := missingHandled[queueID(key)]; handled {
+	if !monitorConfiguredQueues {
+		for _, key := range knownQueues {
+			if _, skip := excluded[key.Name]; skip {
 				continue
 			}
-			if err := s.markQueueDown(ctx, key, "queue was not returned by a successful RabbitMQ listing", now); err != nil {
-				return err
+			if _, ok := current[queueID(key)]; !ok {
+				if _, handled := missingHandled[queueID(key)]; handled {
+					continue
+				}
+				if err := s.markQueueDown(ctx, key, "queue was not returned by a successful RabbitMQ listing", now); err != nil {
+					return err
+				}
 			}
 		}
 	}
@@ -408,7 +428,7 @@ func (s *Service) markQueueDown(ctx context.Context, key models.QueueKey, reason
 }
 
 func (s *Service) finishPoll(ctx context.Context, now time.Time) error {
-	if err := s.store.QueueDueReminders(ctx, now, s.settings.ReminderInterval, s.settings.Recipients); err != nil {
+	if err := s.store.QueueDueReminders(ctx, now, s.settings.ReminderInterval, s.settings.Recipients, s.monitoredQueueAlertKeys()); err != nil {
 		return err
 	}
 	if err := s.deliverQueued(ctx, now); err != nil {
@@ -418,6 +438,25 @@ func (s *Service) finishPoll(ctx context.Context, now time.Time) error {
 		return err
 	}
 	return nil
+}
+
+func (s *Service) monitoredQueueAlertKeys() []string {
+	if len(s.settings.ExpectedQueues) == 0 {
+		return nil
+	}
+
+	excluded := make(map[string]struct{}, len(s.settings.ExcludedQueues))
+	for _, name := range s.settings.ExcludedQueues {
+		excluded[name] = struct{}{}
+	}
+	keys := make([]string, 0, len(s.settings.ExpectedQueues))
+	for _, key := range s.settings.ExpectedQueues {
+		if _, skip := excluded[key.Name]; skip {
+			continue
+		}
+		keys = append(keys, alertKey(key))
+	}
+	return keys
 }
 
 func (s *Service) deliverQueued(ctx context.Context, now time.Time) error {

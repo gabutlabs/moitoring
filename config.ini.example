@@ -27,7 +27,9 @@ url = http://127.0.0.1:15672
 username = monitoring
 password = replace-this-with-a-read-only-rabbitmq-password
 virtual_hosts = /
-expected_queues =
+expected_queues = 
+# When set, monitor only these queue names in every configured virtual host.
+# Leave empty to retain all-queue monitoring.
 excluded_queues =
 history_retention = 24h
 

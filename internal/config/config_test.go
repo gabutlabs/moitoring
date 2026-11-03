@@ -118,6 +118,21 @@ func TestLoadMonitoringPollInterval(t *testing.T) {
 	}
 }
 
+func TestLoadExpectedQueues(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "config.ini.example")
+	if err := os.WriteFile(path, []byte("[rabbitmq]\nexpected_queues = jobs, invoices\n"), 0o600); err != nil {
+		t.Fatalf("write example config: %v", err)
+	}
+
+	settings, err := Load(path)
+	if err != nil {
+		t.Fatalf("Load() error = %v", err)
+	}
+	if len(settings.RabbitMQ.ExpectedQueues) != 2 || settings.RabbitMQ.ExpectedQueues[0] != "jobs" || settings.RabbitMQ.ExpectedQueues[1] != "invoices" {
+		t.Fatalf("expected queues = %v, want jobs and invoices", settings.RabbitMQ.ExpectedQueues)
+	}
+}
+
 func TestServerConfigAddress(t *testing.T) {
 	for _, test := range []struct {
 		host string

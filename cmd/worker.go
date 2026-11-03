@@ -66,18 +66,12 @@ func runWorker(parent context.Context, settings config.Config) error {
 		}
 	}
 	store := sqlite.NewMonitoringRepository(db)
-	expectedQueues := make([]models.QueueKey, 0, len(settings.RabbitMQ.ExpectedQueues)*len(settings.RabbitMQ.VirtualHosts))
-	for _, vhost := range settings.RabbitMQ.VirtualHosts {
-		for _, name := range settings.RabbitMQ.ExpectedQueues {
-			expectedQueues = append(expectedQueues, models.QueueKey{VHost: vhost, Name: name})
-		}
-	}
 	service := monitoringservice.NewService(collector, store, email.NewSender(settings.SMTP), monitoringservice.Settings{
 		PollInterval:     settings.Monitoring.PollInterval,
 		HistoryRetention: settings.RabbitMQ.HistoryRetention,
 		ReminderInterval: settings.Alerts.ReminderInterval,
 		Recipients:       settings.Alerts.Recipients,
-		ExpectedQueues:   expectedQueues,
+		ExpectedQueues:   configuredQueueKeys(settings.RabbitMQ.VirtualHosts, settings.RabbitMQ.ExpectedQueues),
 		ExcludedQueues:   settings.RabbitMQ.ExcludedQueues,
 		WorkerCollector:  workerCollector,
 		Workers:          workers,
@@ -86,4 +80,14 @@ func runWorker(parent context.Context, settings config.Config) error {
 		return fmt.Errorf("run monitoring worker: %w", err)
 	}
 	return nil
+}
+
+func configuredQueueKeys(virtualHosts, queueNames []string) []models.QueueKey {
+	keys := make([]models.QueueKey, 0, len(queueNames)*len(virtualHosts))
+	for _, vhost := range virtualHosts {
+		for _, name := range queueNames {
+			keys = append(keys, models.QueueKey{VHost: vhost, Name: name})
+		}
+	}
+	return keys
 }

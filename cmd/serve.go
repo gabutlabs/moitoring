@@ -70,6 +70,7 @@ func runServer(settings config.Config, configPath string) error {
 	authHandler := handler.NewAuthHandler(authService, settings.Admin.Email, settings.Server.SecureCookies)
 	monitoringHandler := handler.NewMonitoringHandler(monitoringservice.NewQueryService(
 		sqlite.NewMonitoringRepository(db), settings.Monitoring.PollInterval, settings.RabbitMQ.ExcludedQueues,
+		configuredQueueKeys(settings.RabbitMQ.VirtualHosts, settings.RabbitMQ.ExpectedQueues),
 	))
 
 	router := gin.New()

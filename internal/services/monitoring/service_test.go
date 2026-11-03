@@ -142,6 +142,81 @@ func TestDownReminderRecoveryAndNewDownTransition(t *testing.T) {
 	}
 }
 
+func TestConfiguredQueuesAreFilteredAndMissingTargetsAlert(t *testing.T) {
+	db, err := sqlite.Open(context.Background(), filepath.Join(t.TempDir(), "queue-filter.db"))
+	if err != nil {
+		t.Fatalf("Open() error = %v", err)
+	}
+	defer db.Close()
+
+	store := sqlite.NewMonitoringRepository(db)
+	jobs := models.QueueKey{VHost: "/", Name: "jobs"}
+	legacy := models.QueueKey{VHost: "/", Name: "legacy"}
+	if err := store.SaveQueueObservations(context.Background(), []models.QueueObservation{{
+		QueueKey: jobs, State: "idle", Status: "healthy", ObservedAt: time.Now().UTC(),
+	}, {
+		QueueKey: legacy, State: "idle", Status: "healthy", ObservedAt: time.Now().UTC(),
+	}}); err != nil {
+		t.Fatalf("seed existing queue observations: %v", err)
+	}
+
+	collector := &testCollector{queues: []models.QueueObservation{
+		{QueueKey: jobs, State: "idle"},
+		{QueueKey: legacy, State: "down"},
+	}}
+	sender := &recordingSender{}
+	service := NewService(collector, store, sender, Settings{
+		PollInterval:     time.Minute,
+		HistoryRetention: 24 * time.Hour,
+		ReminderInterval: 24 * time.Hour,
+		Recipients:       []string{"ops@example.local"},
+		ExpectedQueues:   []models.QueueKey{jobs},
+	})
+	service.now = func() time.Time { return time.Date(2026, time.November, 3, 10, 0, 0, 0, time.UTC) }
+
+	if err := service.poll(context.Background()); err != nil {
+		t.Fatalf("poll configured queues: %v", err)
+	}
+	if len(sender.notifications) != 0 {
+		t.Fatalf("notifications for an unconfigured queue = %+v, want none", sender.notifications)
+	}
+
+	reader := NewQueryService(store, time.Minute, nil, []models.QueueKey{jobs})
+	snapshot, err := reader.Snapshot(context.Background())
+	if err != nil {
+		t.Fatalf("Snapshot() error = %v", err)
+	}
+	if len(snapshot.Queues) != 1 || snapshot.Queues[0].QueueKey != jobs {
+		t.Fatalf("queues after configured filter = %+v, want only jobs", snapshot.Queues)
+	}
+
+	collector.queues = nil
+	service.now = func() time.Time { return time.Date(2026, time.November, 3, 10, 1, 0, 0, time.UTC) }
+	if err := service.poll(context.Background()); err != nil {
+		t.Fatalf("poll missing configured queue: %v", err)
+	}
+	if len(sender.notifications) != 1 || !strings.Contains(sender.notifications[0].Body, "jobs") || strings.Contains(sender.notifications[0].Body, "legacy") {
+		t.Fatalf("missing queue notifications = %+v, want one jobs alert only", sender.notifications)
+	}
+
+	snapshot, err = reader.Snapshot(context.Background())
+	if err != nil {
+		t.Fatalf("Snapshot() after missing queue error = %v", err)
+	}
+	if len(snapshot.Queues) != 1 || snapshot.Queues[0].QueueKey != jobs || snapshot.Queues[0].Status != "down" {
+		t.Fatalf("queues after missing target = %+v, want only jobs marked down", snapshot.Queues)
+	}
+
+	allQueuesReader := NewQueryService(store, time.Minute, nil, nil)
+	snapshot, err = allQueuesReader.Snapshot(context.Background())
+	if err != nil {
+		t.Fatalf("Snapshot() with no configured queue filter error = %v", err)
+	}
+	if len(snapshot.Queues) != 2 {
+		t.Fatalf("queues with empty expected_queues = %d, want all 2 queues for compatibility", len(snapshot.Queues))
+	}
+}
+
 func TestQueueAndWorkerOutagesShareOneEmailAndReopenAlertsAgain(t *testing.T) {
 	db, err := sqlite.Open(context.Background(), filepath.Join(t.TempDir(), "batched-alerts.db"))
 	if err != nil {
